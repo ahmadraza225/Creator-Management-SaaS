@@ -1,0 +1,172 @@
+// Single source of truth for retainer collaborations.
+// Euka / Reacher are enrichment sources only (see docs/PRODUCT_SPEC.md).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  MEMBER
+}
+
+enum Priority {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+// One pipeline, left to right. DECLINED and STOPPED are exits.
+enum Stage {
+  PROSPECT
+  CLIENT_REVIEW
+  APPROVED
+  CONTRACT_SENT
+  CONTRACT_SIGNED
+  SAMPLE_SHIPPED
+  POSTING
+  COMPLETED
+  STOPPED
+  DECLINED
+}
+
+enum SampleStatus {
+  NOT_SENT
+  SHIPPED
+  DELIVERED
+  NOT_NEEDED
+}
+
+enum PaymentKind {
+  UPFRONT
+  FINAL
+  BONUS
+  OTHER
+}
+
+// The client pays the creator directly (PayPal / Zelle). We only record what happened.
+enum PaymentStatus {
+  PENDING
+  DETAILS_SHARED
+  ON_HOLD
+  PAID
+  CANCELLED
+}
+
+enum PaymentMethod {
+  PAYPAL
+  ZELLE
+  VENMO
+  BANK
+  OTHER
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         Role     @default(ADMIN)
+  createdAt    DateTime @default(now())
+}
+
+model Brand {
+  id                String     @id @default(cuid())
+  name              String     @unique
+  monthlyBudget     Int        @default(0) // whole US dollars
+  retainerProducts  String?
+  affiliateProducts String?
+  priority          Priority   @default(MEDIUM)
+  clientNotes       String?
+  internalNotes     String?
+  active            Boolean    @default(true)
+  // Optional links to an API source, filled in once the shop is connected.
+  eukaBrandId       String?
+  reacherShopId     String?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+  retainers         Retainer[]
+}
+
+model Creator {
+  id             String         @id @default(cuid())
+  handle         String         @unique // TikTok handle without @
+  contact        String?
+  payoutMethod   PaymentMethod?
+  payoutDetails  String? // PayPal email / Zelle number
+  followers      String?
+  gmvNote        String?
+  notes          String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  retainers      Retainer[]
+}
+
+model Retainer {
+  id                     String       @id @default(cuid())
+  brandId                String
+  brand                  Brand        @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  creatorId              String
+  creator                Creator      @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  flatFee                Int          @default(0) // whole US dollars
+  videosRequired         Int          @default(0)
+  upfrontPercent         Int          @default(50)
+  affiliateCommissionPct Float?
+  adsCommissionPct       Float?
+  stage                  Stage        @default(PROSPECT)
+  stageChangedAt         DateTime     @default(now())
+  sampleStatus           SampleStatus @default(NOT_SENT)
+  angles                 String?
+  contractUrl            String?
+  startDate              DateTime     @default(now())
+  dueDate                DateTime?
+  notes                  String?
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+  videos                 Video[]
+  payments               Payment[]
+
+  @@index([brandId])
+  @@index([creatorId])
+  @@index([stage])
+}
+
+model Video {
+  id           String    @id @default(cuid())
+  retainerId   String
+  retainer     Retainer  @relation(fields: [retainerId], references: [id], onDelete: Cascade)
+  url          String
+  sparkCode    String?
+  postedOn     DateTime?
+  angle        String?
+  views        Int?
+  gmv          Float?
+  disqualified Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+
+  @@unique([retainerId, url])
+}
+
+model Payment {
+  id         String         @id @default(cuid())
+  retainerId String
+  retainer   Retainer       @relation(fields: [retainerId], references: [id], onDelete: Cascade)
+  kind       PaymentKind
+  amount     Float
+  status     PaymentStatus  @default(PENDING)
+  method     PaymentMethod?
+  reference  String? // transaction id from the client
+  proofUrl   String? // screenshot / receipt link
+  paidOn     DateTime?
+  notes      String?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  @@index([retainerId])
+  @@index([status])
+}
